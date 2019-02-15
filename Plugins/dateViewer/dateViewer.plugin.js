@@ -1,7 +1,7 @@
 //META{"name":"dateViewer","displayName":"Date Viewer","website":"https://github.com/hammy1/BDStuff/tree/master/Plugins/dateViewer","source":"https://raw.githubusercontent.com/hammy1/BDStuff/master/Plugins/dateViewer/dateViewer.plugin.js"}*//
 
 var dateViewer = (() => {
-    const config = {"info":{"name":"Date Viewer","authors":[{"name":"hammy","discord_id":"256531049222242304","github_username":"hammy1"}],"version":"0.2.2","description":"Displays current time, date and day of the week on your right side. The way it's displayed depends on your locale conventions.","github":"https://github.com/hammy1/BDStuff/tree/master/Plugins/dateViewer","github_raw":"https://raw.githubusercontent.com/hammy1/BDStuff/master/Plugins/dateViewer/dateViewer.plugin.js"},"main":"index.js"};
+    const config = {"info":{"name":"Date Viewer","authors":[{"name":"hammy","discord_id":"256531049222242304","github_username":"hammy1"}],"version":"0.2.3","description":"Displays current time, date and day of the week on your right side. The way it's displayed depends on your locale conventions.","github":"https://github.com/hammy1/BDStuff/tree/master/Plugins/dateViewer","github_raw":"https://raw.githubusercontent.com/hammy1/BDStuff/master/Plugins/dateViewer/dateViewer.plugin.js"},"changelog":[{"title":"Evolving?","type":"improved","items":["Now renders using React!"]}],"main":"index.js"};
 
     return !global.ZeresPluginLibrary ? class {
         getName() {return config.info.name;}
@@ -13,7 +13,55 @@ var dateViewer = (() => {
         stop() {}
     } : (([Plugin, Api]) => {
         const plugin = (Plugin, Api) => {
-    const {PluginUtilities, DiscordClasses, DiscordSelectors, DOMTools} = Api;
+	const {PluginUtilities, DiscordSelectors, WebpackModules, DiscordModules, Patcher, ReactTools} = Api;
+	
+	const Viewer = class Viewer extends DiscordModules.React.Component {
+		constructor(props) {
+			super(props);
+			this.interval;
+			this.state = { time: 0, date: "", weekday: "" };
+			this.update = this.update.bind(this);
+		}
+
+		componentDidMount() {
+			this.update();
+			this.interval = setInterval(() => this.update(), 1000);
+		}
+
+		componentWillUnmount() {
+			clearInterval(this.interval);
+		}
+
+		update() {
+			const date = new Date();
+			const lang = document.documentElement.lang;
+			this.setState({
+				time: date.toLocaleTimeString(lang),
+				date: date.toLocaleDateString(lang, { day: "2-digit", month: "2-digit", year: "numeric" }),
+				weekday: date.toLocaleDateString(lang, { weekday: "long" })
+			});
+		}
+
+		render() {
+			return DiscordModules.React.createElement("div", {
+				id: "dv-mount"
+			},
+				DiscordModules.React.createElement("div", {
+					id: "dv-main"
+				},
+					DiscordModules.React.createElement("span", {
+						className: "dv-time"
+					}, this.state.time),
+					DiscordModules.React.createElement("span", {
+						className: "dv-date"
+					}, this.state.date),
+					DiscordModules.React.createElement("span", {
+						className: "dv-weekday"
+					}, this.state.weekday)
+				)
+			);
+		}
+	}
 
     return class dateViewer extends Plugin {
         constructor() {
@@ -31,7 +79,6 @@ var dateViewer = (() => {
 					width: 240px;
 					z-index: 256;
 				}
-
 				#dv-main {
 					--gap: 20px;
 					background-color: transparent;
@@ -47,98 +94,63 @@ var dateViewer = (() => {
 					text-transform: uppercase;
 					width: calc(100% - var(--gap) * 2);
 				}
-
 				#dv-main .dv-date {
 					font-size: small;
 					opacity: .6;
 				}
-
 				.theme-light #dv-mount {
 					background-color: #f3f3f3;
 				}
-
 				.theme-light #dv-main {
 					border-top: 1px solid #e6e6e6;
 					color: #737f8d;
 				}
-
 				${DiscordSelectors.MemberList.membersWrap} ${DiscordSelectors.MemberList.members} {
 					height: calc(100% - 95px);
 				}
-			`;
-
-			this.markup = `
-				<div id="dv-main">
-					<span class="dv-time"></span>
-					<span class="dv-date"></span>
-					<span class="dv-weekday"></span>
-				</div>
 			`;
         }
 		
         onStart() {
             PluginUtilities.addStyle(this.getName()  + "-style", this.style);
-			this.append();
+			this.patchMemberList();
 			this.initialized = true;
 		}
 		
         onStop() {
             PluginUtilities.removeStyle(this.getName()  + "-style");
-			this.remove();
+			Patcher.unpatchAll();
+			this.updateMemberList();
 		}
 
-		onSwitch() {
-			this.append();
+		patchMemberList() {
+			const Scroller = WebpackModules.getByDisplayName("VerticalScroller");
+			
+			Patcher.after(Scroller.prototype, "render", (that, args, value) => {
+				const key = this.getProps(that, "props.children.2.0.key");
+				if (typeof key === "string" && key.includes("section-container")) return value;
+
+				const children = this.getProps(value, "props.children.0.props.children.1");
+				if (!children || !Array.isArray(children)) return value;
+
+				const memberlist = this.getProps(children, "2") || this.getProps(children, "1");
+				const viewer = DiscordModules.React.createElement(Viewer, {});
+
+				memberlist && memberlist.push && memberlist.push([viewer, null]);
+
+				return value;
+			});
+			
+			this.updateMemberList();
 		}
 
-		observer(e) {
-			if (e.type === 'childList' && e.addedNodes) {
-				for (const node of e.addedNodes) {
-					if (node.classList && DOMTools.hasClass(node, DiscordClasses.MemberList.membersWrap))
-						this.append();
-
-					break;
-				}
-			}
+		updateMemberList() {
+			const memberList = document.querySelector(DiscordSelectors.MemberList.members.value.trim());
+			if (memberList) ReactTools.getOwnerInstance(memberList).forceUpdate();
 		}
 
-		append() {
-			const memberList = document.querySelector(DiscordSelectors.MemberList.membersWrap);
-			if (!memberList || document.querySelector('#dv-mount'))
-				return;
-
-			const mount = document.createElement('div');
-			mount.id = 'dv-mount';
-			mount.innerHTML = this.markup;
-			memberList.appendChild(mount);
-			this.update();
-
-			clearInterval(this.interval);
-			this.interval = setInterval(this.update, 1000);
-		}
-
-		remove() {
-			const header = document.querySelector('#dv-mount');
-			if (!header)
-				return;
-
-			header.remove();
-		}
-
-		update() {
-			const header = document.querySelector('#dv-main');
-			if (!header)
-				return;
-
-			const _date = new Date();
-			let lang = document.documentElement.lang;
-			let time = _date.toLocaleTimeString(lang);
-			let date = _date.toLocaleDateString(lang, { day: '2-digit', month: '2-digit', year: 'numeric' });
-			let weekday = _date.toLocaleDateString(lang, { weekday: 'long' });
-
-			header.querySelector('.dv-time').innerText = time;
-			header.querySelector('.dv-date').innerText = date;
-			header.querySelector('.dv-weekday').innerText = weekday;
+		getProps(obj, path) {
+			return path.split(/\s?\.\s?/).reduce((object, prop) => object && object[prop], obj);
 		}
 	}
 }
