@@ -14,6 +14,7 @@ var DateViewer = (() => {
     } : (([Plugin, Api]) => {
         const plugin = (Plugin, Api) => {
 	const {PluginUtilities, DiscordSelectors, WebpackModules, DiscordModules, Patcher, ReactTools} = Api;
+	const Scroller = WebpackModules.getByProps("ScrollerThin");
 	const Lists = WebpackModules.getByProps("ListThin");
 	
 	const ErrorBoundary = class ErrorBoundary extends DiscordModules.React.Component {
@@ -72,7 +73,7 @@ var DateViewer = (() => {
 		}
 
 		render() {
-			if (!DiscordModules.SelectedGuildStore.getGuildId()) return null;
+			if (!document.getElementsByClassName("members-1998pB")[0]) return null;
 			return DiscordModules.React.createElement("div", {
 				id: "dv-mount"
 			},
@@ -146,6 +147,20 @@ var DateViewer = (() => {
 
 		patchMemberList() {
 			if (!Lists) return;
+			
+			Patcher.after(Scroller.ScrollerThin, "render", (that, args, value) => {
+				const val = Array.isArray(value) ? value.find((item) => item && !item.key) : value;
+				const props = this.getProps(val, "props");
+				if (!props || !props.className || !props.className.startsWith("members")) return value;
+
+				const viewer = DiscordModules.React.createElement(WrapBoundary(Viewer), {key: "DateViewer-Instance"});
+				const fn = (item) => item && item.key && item.key === "DateViewer-Instance";
+				
+				if (!Array.isArray(value)) value = [value];
+				if (!value.some(fn)) value.push(viewer);
+
+				return value;
+			})
 			
 			Patcher.after(Lists.ListThin, "render", (that, args, value) => {
 				const props = this.getProps(value, "props");
